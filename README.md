@@ -139,15 +139,18 @@ Código: `src/features/planning/domain/productionModel.ts` (modelo), `simplex.ts
 - **Cierre:** sábado 11:30:00 (hora de Monterrey) **inclusive**. Un pedido a las 11:30:00 entra en la semana actual; a las 11:30:01 pasa a la siguiente, con aviso que indica la fecha del domingo.
 - **Cupo semanal:** 600 porciones, que se reinicia cada domingo. Un pedido que no cabe entero (por ejemplo, de 10 porciones con 5 libres) **no se parte**: pasa completo a la semana siguiente.
 - **Rutas del domingo:** abierta 8:00–17:00 gratis (cupo 90 entregas), mañana 8:00–12:00 con cargo de `$99` (cupo 30) y tarde 13:00–17:00 con cargo de `$99` (cupo 30). Si la ruta elegida está llena, el pedido pasa a la ruta abierta con aviso; si la abierta también está llena, pasa a la semana siguiente. Cancelar devuelve el cupo. Todo se reinicia cada domingo.
+- **Editar o cancelar un pedido:** después del cierre de su semana ya no se puede (aviso: «El pedido P-000123 es de una semana cerrada el sábado a las 11:30: ya no se puede cambiar porque la producción se calculó con él.»; la hora es la configurada en Admin). Una edición **no cambia de semana**: si el plan nuevo no entra en el cupo semanal o la ruta elegida está llena, se rechaza con un aviso que lo explica y el pedido queda como estaba. El cargo de ruta sigue a la ruta (se cobra al pasar a mañana/tarde y se quita al pasar a la abierta). Código: `src/features/orders/domain/editOrder.ts` y `ChangeService.saveOrder`.
+- **Pedidos simultáneos:** la verificación de cupos y la escritura del pedido nuevo ocurren en una sola transacción de IndexedDB, así que dos pestañas no pueden ocupar el último lugar a la vez.
 - Pantallas: Pedidos (tabla virtualizada con búsqueda por cliente o código y filtros de semana, plan, ruta y sin gluten; formulario de alta) y Rutas (ocupación de cada ruta).
 
 ## Historial, deshacer/rehacer y «Estado al…»
 
 - **Eventos inmutables:** cada cambio (pedidos, recetas, menús, ajustes, planes marcados como desactualizados) guarda usuario, fecha y hora, entidad, campo, valor anterior y valor nuevo. El usuario es el nombre del campo **Operador** del encabezado (por pestaña).
 - **Deshacer/rehacer, 50 pasos:** deshacer y rehacer **agregan eventos compensatorios** (no borran historial). Más allá de 50 pasos, el botón avisa «No hay más pasos para deshacer (máximo 50)».
+- **Deshacer/rehacer seguro:** no pisa cambios de otra pestaña. Si el pedido, la receta, el menú o los ajustes cambiaron en otra pestaña desde ese paso, se rechaza con un aviso y no se escribe nada (el paso se descarta). Tampoco se puede deshacer/rehacer un pedido de una semana ya cerrada, ni restaurar un pedido cancelado si el cupo ya no alcanza (el paso queda disponible). Si otra pestaña restaura los datos de ejemplo, la pila de deshacer de todas las pestañas se vacía.
 - **Snapshots semanales:** antes del primer cambio de cada semana se guarda una foto del estado de recetas, menús y ajustes (más una foto base inicial).
 - **«Estado al…»:** reconstruye el estado en un instante reproduciendo los eventos desde el snapshot más cercano (los pedidos también se filtran por fecha de creación), recalcula el plan con esos datos y muestra las porciones que se habrían cocinado. Antes del primer registro muestra el estado inicial de los datos de ejemplo con el aviso «Antes del primer registro».
-- **Plan desactualizado:** si cambia un precio, una receta, un menú, un ajuste o un pedido después de calcular, el plan se marca «desactualizado» hasta recalcular, y queda registrado.
+- **Plan desactualizado:** si cambia un precio, una receta, un menú, un ajuste o un pedido después de calcular, el plan se marca «desactualizado» hasta recalcular, y queda registrado. La detección reconstruye la entrada que usaría el próximo cálculo (recetas activas del menú, topes efectivos, rotación) y la compara con la guardada; si algo cambió mientras el cálculo corría, el plan se guarda ya como desactualizado. Los cambios se avisan a las otras pestañas después de marcar los planes, y calcular/recalcular también avisa.
 
 ## Dos pestañas y regla de conflicto
 
@@ -155,6 +158,7 @@ La sincronización usa `BroadcastChannel` (`src/shared/infrastructure/syncChanne
 
 - Antes del cierre gana **la última versión guardada**.
 - Si una edición se guarda **después del sábado 11:30**, gana la versión guardada **antes del cierre** (la producción ya se calculó con ella).
+- Una edición tardía sobre la versión que la pestaña había cargado (sin que otra pestaña haya guardado) directamente se rechaza por semana cerrada; la regla de conflicto aplica cuando la versión guardada ya cambió.
 - En ambos casos se muestra un aviso con **los dos valores**, se ofrece **Elegir el otro valor** (si el cierre lo permite) y todo queda registrado en el historial como conflicto.
 
 Código: `src/features/orders/domain/conflict.ts` y `ChangeService.saveOrder`.

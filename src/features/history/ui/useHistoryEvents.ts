@@ -36,8 +36,5 @@ export function useHistoryEvents(filter: EventFilter) {
 /** Users that appear in the history, for the filter. */
 export function useHistoryUsers() {
   const { repos } = useServices();
-  return useLiveData(async () => {
-    const all = await repos.events.listAscending();
-    return [...new Set(all.map((e) => e.user))].sort();
-  }, []);
+  return useLiveData(() => repos.events.listUsers(), []);
 }

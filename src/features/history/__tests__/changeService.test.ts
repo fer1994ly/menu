@@ -57,6 +57,24 @@ describe('ChangeService: events', () => {
     expect((await tab.orders.get(order.id))!.status).toBe('cancelled');
   });
 
+  it('lists distinct users and reads one entity ascending inside an id window', async () => {
+    await tab.changes.saveRecipe({ ...(await tab.recipes.get('R1'))!, cost: 50 });
+    tab.clock.now += 1000;
+    await tab.changes.createOrder(makeOrder());
+    tab.clock.now += 1000;
+    await tab.changes.saveRecipe({ ...(await tab.recipes.get('R1'))!, cost: 51 });
+    expect(await tab.events.listUsers()).toEqual(['Ana']);
+
+    const orders = await tab.events.listAscending({ entity: 'order' });
+    expect(orders.map((e) => e.entity)).toEqual(['order']);
+    const all = await tab.events.listAscending();
+    expect(all.map((e) => e.id)).toEqual([...all.map((e) => e.id)].sort());
+    const after = await tab.events.listAscending({ entity: 'recipe', afterId: all[0]!.id });
+    expect(after.every((e) => e.entity === 'recipe' && e.id > all[0]!.id)).toBe(true);
+    expect(after).toHaveLength(1);
+    expect(await tab.events.listAscending({ entity: 'recipe', untilMs: tab.clock.now - 1500 })).toHaveLength(1);
+  });
+
   it('filters by entity, user and time window and paginates with a cursor', async () => {
     for (let i = 0; i < 7; i += 1) {
       tab.clock.now += 1000;

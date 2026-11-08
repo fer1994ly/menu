@@ -67,8 +67,22 @@ export class IdbEventStore implements EventStore {
     } else if (upper !== undefined) {
       range = IDBKeyRange.upperBound(upper, true);
     }
-    const all = await this.db.getAll('events', range);
-    return query.entity ? all.filter((event) => event.entity === query.entity) : all;
+    if (query.entity) {
+      // The `entity` index is ordered by id inside one entity: read only that entity, then cut the window.
+      const ofEntity = await this.db.getAllFromIndex('events', 'entity', query.entity);
+      return ofEntity.filter((event) => (range ? range.includes(event.id) : true));
+    }
+    return this.db.getAll('events', range);
+  }
+
+  async listUsers(): Promise<string[]> {
+    const users: string[] = [];
+    let cursor = await this.db.transaction('events').store.index('user').openKeyCursor(null, 'nextunique');
+    while (cursor) {
+      users.push(cursor.key);
+      cursor = await cursor.continue();
+    }
+    return users.sort();
   }
 
   first(): Promise<HistoryEvent | undefined> {

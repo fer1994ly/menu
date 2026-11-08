@@ -33,6 +33,8 @@ export interface EventStore {
   query(filter?: EventFilter, page?: { limit?: number; cursor?: string | null }): Promise<EventPage>;
   /** Chronological order, for replay. */
   listAscending(query?: AscendingQuery): Promise<HistoryEvent[]>;
+  /** Distinct users that appear in the log, sorted. */
+  listUsers(): Promise<string[]>;
   first(): Promise<HistoryEvent | undefined>;
   lastId(): Promise<string>;
   count(): Promise<number>;
