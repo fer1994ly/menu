@@ -84,8 +84,9 @@ describe('two tabs editing the same order', () => {
     const loadedA = (await a.orders.get('o-1'))!;
     const loadedB = (await b.orders.get('o-1'))!;
 
-    b.clock.now = CLOSE + 2 * MIN;
-    await b.changes.saveOrder(loadedB, { ...loadedB, plan: 10, portions: 10 });
+    // Editing after the close is refused now, so a late stored version can only be a legacy record.
+    void loadedB;
+    await b.orders.put({ ...loadedA, plan: 10, portions: 10, version: 2, updatedAt: CLOSE + 2 * MIN });
     a.clock.now = CLOSE + 4 * MIN;
     const outcome = await a.changes.saveOrder(loadedA, { ...loadedA, route: 'afternoon' });
 

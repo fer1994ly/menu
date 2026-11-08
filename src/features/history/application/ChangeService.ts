@@ -2,13 +2,14 @@ import type { SettingsRepository } from '@/features/admin/application/ports';
 import { validateSettings, type Settings } from '@/features/admin/domain/settings';
 import type { OrdersRepository } from '@/features/orders/application/ports';
 import { resolveOrderConflict, type ConflictResolution } from '@/features/orders/domain/conflict';
+import { checkOrderCapacity, checkWeekOpen, type OrderEditRejection } from '@/features/orders/domain/editOrder';
 import type { Order } from '@/features/orders/domain/order';
 import type { MenusRepository } from '@/features/planning/application/ports';
 import type { WeekMenu } from '@/features/planning/domain/menu';
 import type { RecipesRepository } from '@/features/recipes/application/ports';
 import { validateRecipe, type RecipeEntity } from '@/features/recipes/domain/recipe';
 import { randomId, type Clock } from '@/shared/kernel/runtime';
-import { closeInstantForWeek, weekIdForInstant } from '@/shared/kernel/time';
+import { closeInstantForWeek, isWeekClosed, weekIdForInstant } from '@/shared/kernel/time';
 import type { SyncBus } from '@/shared/infrastructure/syncChannel';
 import { diffFields } from '../domain/diff';
 import { CONFLICT_MARKER, createEventId, WHOLE_ENTITY, type EventEntity, type EventKind, type HistoryEvent } from '../domain/event';
@@ -68,7 +69,9 @@ export type SaveResult<T> = { ok: true; value: T } | { ok: false; errors: Record
 
 export type SaveOrderOutcome =
   | { status: 'saved'; order: Order }
-  | { status: 'conflict'; order: Order; resolution: ConflictResolution };
+  | { status: 'conflict'; order: Order; resolution: ConflictResolution }
+  /** The edit was refused and nothing changed; `message` is the Spanish text for the operator. */
+  | ({ status: 'rejected' } & OrderEditRejection);
 
 export interface ChangeServiceDeps {
   orders: OrdersRepository;
@@ -146,14 +149,29 @@ export class ChangeService {
   /**
    * Optimistic save: `loaded` is the version this tab read. When the stored
    * version moved on (another tab saved), the conflict rule decides the winner.
+   *
+   * Edits are refused (typed `rejected` outcome, nothing written) when the order's
+   * week already closed, when a plan increase does not fit the weekly quota, or
+   * when the order is moved to a full route. A stale `loaded` version skips only
+   * the closed-week refusal: the conflict rule already keeps the version saved
+   * before the close.
    */
   async saveOrder(loaded: Order, edited: Order): Promise<SaveOrderOutcome> {
     const stored = await this.deps.orders.get(loaded.id);
     if (!stored) throw new Error(`Order ${loaded.id} does not exist`);
     const at = this.deps.clock();
+    const settings = await this.deps.settings.get();
 
     if (stored.version === loaded.version) {
-      const next: Order = { ...edited, id: stored.id, version: stored.version + 1, updatedAt: at };
+      const closed = checkWeekOpen(stored, at, settings.closeTime);
+      if (closed) return { status: 'rejected', ...closed };
+    }
+    const normalized = this.normalizeEdit(stored, edited, settings);
+    const refused = await this.checkCapacity(stored, normalized, settings);
+    if (refused) return { status: 'rejected', ...refused };
+
+    if (stored.version === loaded.version) {
+      const next: Order = { ...normalized, id: stored.id, version: stored.version + 1, updatedAt: at };
       const mutation: Mutation = { entity: 'order', entityId: stored.id, before: stored, after: next };
       await this.commit(mutation, 'user', at);
       this.record(
@@ -162,7 +180,23 @@ export class ChangeService {
       );
       return { status: 'saved', order: next };
     }
-    return this.resolveConflict(loaded, edited, stored, at);
+    return this.resolveConflict(loaded, normalized, stored, at);
+  }
+
+  /** Portions always follow the plan; the route surcharge follows the route (kept while the route is unchanged). */
+  private normalizeEdit(stored: Order, edited: Order, settings: Settings): Order {
+    const routeChargeCents =
+      edited.route === stored.route ? stored.routeChargeCents : edited.route === 'open' ? 0 : settings.routeChargeCents;
+    return { ...edited, portions: edited.plan, routeChargeCents };
+  }
+
+  private async checkCapacity(stored: Order, edited: Order, settings: Settings): Promise<OrderEditRejection | null> {
+    const others = (await this.deps.orders.listByWeek(stored.weekId)).filter((o) => o.id !== stored.id);
+    return checkOrderCapacity(stored, edited, {
+      others,
+      weeklyPortionQuota: settings.weeklyPortionQuota,
+      routeQuotas: settings.routeQuotas,
+    });
   }
 
   cancelOrder(loaded: Order): Promise<SaveOrderOutcome> {
@@ -176,8 +210,8 @@ export class ChangeService {
   async chooseOtherOrderValue(resolution: ConflictResolution): Promise<SaveOrderOutcome | null> {
     const stored = await this.deps.orders.get(resolution.winner.id);
     if (!stored || !resolution.canChooseOther) return null;
-    const closeInstant = await this.closeInstantFor(stored.weekId);
-    if (this.deps.clock() > closeInstant) return null;
+    const { closeTime } = await this.deps.settings.get();
+    if (isWeekClosed(stored.weekId, this.deps.clock(), closeTime)) return null;
     return this.saveOrder(stored, { ...resolution.loser });
   }
 
@@ -401,13 +435,13 @@ export class ChangeService {
 
   /** Takes the weekly snapshot (and the baseline the first time) BEFORE the first change of a week. */
   private async ensureSnapshot(at: number): Promise<void> {
-    const weekId = weekIdForInstant(at);
+    const settings = await this.deps.settings.get();
+    const weekId = weekIdForInstant(at, settings.closeTime);
     const id = `week-${weekId}`;
     if (await this.deps.snapshots.get(id)) return;
-    const [recipes, menus, settings, lastEventId] = await Promise.all([
+    const [recipes, menus, lastEventId] = await Promise.all([
       this.deps.recipes.list(),
       this.deps.menus.list(),
-      this.deps.settings.get(),
       this.deps.events.lastId(),
     ]);
     if ((await this.deps.snapshots.count()) === 0) {

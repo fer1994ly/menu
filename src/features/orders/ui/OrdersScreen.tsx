@@ -38,8 +38,7 @@ export function OrdersScreen() {
 
   const { data: all, error } = useLiveData(async () => {
     const orders = filters.week === ALL ? await repos.orders.listAll() : await repos.orders.listByWeek(filters.week);
-    const settings = await repos.settings.get();
-    return { orders: orders.sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0)), routeChargeCents: settings.routeChargeCents };
+    return { orders: orders.sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0)) };
   }, [filters.week]);
 
   const visible = useMemo(() => (all ? filterOrders(all.orders, { ...filters, search: deferredSearch }) : []), [all, filters, deferredSearch]);
@@ -48,6 +47,7 @@ export function OrdersScreen() {
 
   const report = (outcome: SaveOrderOutcome, ok: string) => {
     if (outcome.status === 'saved') setFeedback({ tone: 'ok', text: ok });
+    else if (outcome.status === 'rejected') setFeedback({ tone: 'error', text: outcome.message });
     else setFeedback({ tone: 'warning', text: outcome.resolution.notice, conflict: outcome.resolution });
   };
 
@@ -55,8 +55,8 @@ export function OrdersScreen() {
     if (!editing) return;
     setBusy(true);
     try {
-      const charge = edit.route === 'open' ? 0 : (all?.routeChargeCents ?? 0);
-      const outcome = await changes.saveOrder(editing, { ...editing, ...edit, portions: edit.plan, routeChargeCents: charge });
+      // Portions, route surcharge, closed week and quotas are enforced by the ChangeService.
+      const outcome = await changes.saveOrder(editing, { ...editing, ...edit });
       report(outcome, `Pedido ${editing.code} guardado.`);
       setEditing(null);
     } catch (e) {
@@ -80,11 +80,14 @@ export function OrdersScreen() {
 
   const chooseOther = async (resolution: NonNullable<Feedback['conflict']>) => {
     const outcome = await changes.chooseOtherOrderValue(resolution);
-    setFeedback(
-      outcome
-        ? { tone: 'ok', text: `Pedido ${resolution.winner.code}: quedó el otro valor.` }
-        : { tone: 'error', text: 'Ya no se puede elegir el otro valor: el cierre ya pasó.' },
-    );
+    if (outcome?.status === 'rejected') setFeedback({ tone: 'error', text: outcome.message });
+    else {
+      setFeedback(
+        outcome
+          ? { tone: 'ok', text: `Pedido ${resolution.winner.code}: quedó el otro valor.` }
+          : { tone: 'error', text: 'Ya no se puede elegir el otro valor: el cierre ya pasó.' },
+      );
+    }
   };
 
   const weekHasNoOrders = all !== null && all.orders.length === 0;

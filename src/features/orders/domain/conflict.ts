@@ -107,7 +107,7 @@ export function resolveOrderConflict(input: ConflictInput): ConflictResolution {
   const mineText = describe(mine.order, shown);
   const theirsText = describe(theirs.order, shown);
   const code = base.code;
-  const canChoose = (other: SavedVersion): boolean => now <= closeInstant && truncateToSecond(other.savedAt) <= closeInstant;
+  const canChoose = (other: SavedVersion): boolean => truncateToSecond(now) <= closeInstant && truncateToSecond(other.savedAt) <= closeInstant;
 
   if (mineOnTime && theirsOnTime) {
     // Equal save seconds: break the tie by display text so both tabs converge on the same winner.

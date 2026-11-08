@@ -23,7 +23,7 @@ describe('Historial', () => {
     expect(costRow).toHaveTextContent('Receta R1');
     expect(costRow).toHaveTextContent('48.5 → 50');
     expect(costRow).toHaveTextContent('2026-11-13 10:00:00');
-    const routeRow = rows.find((row) => row.textContent?.includes('route')) as HTMLElement;
+    const routeRow = rows.find((row) => row.textContent?.includes('route:')) as HTMLElement;
     expect(routeRow).toHaveTextContent('Pedido P-000001');
     expect(routeRow).toHaveTextContent('open → morning');
   });

@@ -170,3 +170,21 @@ describe('resolveOrderConflict: value descriptions', () => {
     expect(result.notice).toContain('P-000123');
   });
 });
+
+describe('resolveOrderConflict: close precision is whole seconds', () => {
+  const input = (now: number) => ({
+    base,
+    mine: { order: plan10, savedAt: CLOSE - 10 * MIN },
+    theirs: { order: plan5Morning, savedAt: CLOSE - 5 * MIN },
+    closeInstant: CLOSE,
+    now,
+  });
+
+  it('still allows choosing the other value at 11:30:00.999', () => {
+    expect(resolveOrderConflict(input(CLOSE + 999)).canChooseOther).toBe(true);
+  });
+
+  it('stops allowing it from 11:30:01', () => {
+    expect(resolveOrderConflict(input(CLOSE + 1000)).canChooseOther).toBe(false);
+  });
+});

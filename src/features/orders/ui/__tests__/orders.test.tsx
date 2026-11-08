@@ -58,6 +58,21 @@ describe('Pedidos', () => {
     expect(events.events.some((e) => e.field === 'route' && e.newValue === 'afternoon')).toBe(true);
   });
 
+  it('refuses to edit an order of a closed week and shows why', async () => {
+    const user = userEvent.setup();
+    const h = await bootServices();
+    renderApp(h.services, '/pedidos');
+    await user.click(await screen.findByRole('button', { name: 'Editar P-000001' }));
+    h.time.now = closeInstantForWeek(WEEK) + 60_000;
+    const editor = screen.getByTestId('order-editor');
+    await user.selectOptions(within(editor).getByLabelText('Ruta'), 'afternoon');
+    await user.click(within(editor).getByRole('button', { name: 'Guardar cambios' }));
+    expect(await screen.findByTestId('order-feedback')).toHaveTextContent(
+      'El pedido P-000001 es de una semana cerrada el sábado a las 11:30: ya no se puede cambiar porque la producción se calculó con él.',
+    );
+    expect((await h.services.repos.orders.get('o-000001'))?.route).not.toBe('afternoon');
+  });
+
   it('cancels an order and gives the quota back', async () => {
     const user = userEvent.setup();
     const h = await bootServices();
