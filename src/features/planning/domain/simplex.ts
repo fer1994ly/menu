@@ -65,7 +65,8 @@ export interface SimplexTrace {
   phases: PhaseTrace[];
 }
 
-export type SimplexStatus = 'optimal' | 'infeasible' | 'unbounded';
+/** `iteration-limit`: the pivot budget ran out before optimality was proven; the result must not be used. */
+export type SimplexStatus = 'optimal' | 'infeasible' | 'unbounded' | 'iteration-limit';
 
 export interface SimplexResult {
   status: SimplexStatus;
@@ -77,6 +78,8 @@ export interface SimplexResult {
 
 export interface SimplexOptions {
   tolerance?: number;
+  /** Pivot budget per phase (default 20000). */
+  maxIterations?: number;
 }
 
 interface State {
@@ -156,16 +159,22 @@ function runPhase(
   phase: 1 | 2,
   usableColumns: number,
   tol: number,
-): { outcome: 'optimal' | 'unbounded'; phaseTrace: PhaseTrace } {
+  maxIterations: number,
+): { outcome: 'optimal' | 'unbounded' | 'iteration-limit'; phaseTrace: PhaseTrace } {
   const initial = snapshot(state);
   const pivots: PivotStep[] = [];
-  let outcome: 'optimal' | 'unbounded' = 'optimal';
-  for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+  let outcome: 'optimal' | 'unbounded' | 'iteration-limit' = 'optimal';
+  let settled = false;
+  for (let iteration = 1; iteration <= maxIterations; iteration++) {
     const col = chooseEntering(state, tol, usableColumns);
-    if (col < 0) break;
+    if (col < 0) {
+      settled = true;
+      break;
+    }
     const row = chooseLeaving(state, col, tol);
     if (row < 0) {
       outcome = 'unbounded';
+      settled = true;
       break;
     }
     const leaving = state.columns[state.basis[row] as number] as string;
@@ -180,6 +189,8 @@ function runPhase(
       tableau: snapshot(state),
     });
   }
+  // The budget ran out: optimal only if nothing is left to enter.
+  if (!settled && chooseEntering(state, tol, usableColumns) >= 0) outcome = 'iteration-limit';
   return { outcome, phaseTrace: { phase, initial, pivots, final: snapshot(state) } };
 }
 
@@ -281,6 +292,7 @@ function dropArtificialColumns(state: State, artificialStart: number): void {
 export function solveSimplex(problem: LpProblem, options: SimplexOptions = {}): SimplexResult {
   validate(problem);
   const tol = options.tolerance ?? SIMPLEX_TOLERANCE;
+  const maxIterations = options.maxIterations ?? MAX_ITERATIONS;
   const n = problem.variableNames.length;
   const { state, artificialStart, artificialCount } = buildInitialState(problem);
   const trace: SimplexTrace = { phases: [] };
@@ -294,8 +306,9 @@ export function solveSimplex(problem: LpProblem, options: SimplexOptions = {}): 
   if (artificialCount > 0) {
     const cost1 = state.columns.map((_, j) => (j >= artificialStart ? 1 : 0));
     priceOut(state, cost1);
-    const { phaseTrace } = runPhase(state, 1, state.columns.length, tol);
+    const { outcome: phase1Outcome, phaseTrace } = runPhase(state, 1, state.columns.length, tol, maxIterations);
     trace.phases.push(phaseTrace);
+    if (phase1Outcome === 'iteration-limit') return fail('iteration-limit');
     const scale = Math.max(1, ...state.rows.map((r) => Math.abs(r[r.length - 1] as number)));
     if (-(state.obj[state.columns.length] as number) > tol * scale) return fail('infeasible');
     evictArtificials(state, artificialStart, tol, phaseTrace);
@@ -304,9 +317,9 @@ export function solveSimplex(problem: LpProblem, options: SimplexOptions = {}): 
 
   const cost2 = state.columns.map((_, j) => (j < n ? (problem.objective[j] as number) : 0));
   priceOut(state, cost2);
-  const { outcome, phaseTrace } = runPhase(state, 2, state.columns.length, tol);
+  const { outcome, phaseTrace } = runPhase(state, 2, state.columns.length, tol, maxIterations);
   trace.phases.push(phaseTrace);
-  if (outcome === 'unbounded') return fail('unbounded');
+  if (outcome !== 'optimal') return fail(outcome);
 
   const width = state.columns.length;
   const solution = new Array<number>(n).fill(0);

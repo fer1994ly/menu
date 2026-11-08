@@ -96,6 +96,37 @@ describe('solveSimplex: textbook problems', () => {
     expect(r.objectiveValue).toBeNull();
   });
 
+  it('reports an exhausted iteration budget as its own status, never as optimal', () => {
+    const problem = {
+      variableNames: ['x', 'y'],
+      objective: [-3, -2],
+      constraints: [
+        { label: 'a', coefficients: [1, 1], sense: '<=' as const, rhs: 4 },
+        { label: 'b', coefficients: [1, 0], sense: '<=' as const, rhs: 3 },
+      ],
+    };
+    expect(solveSimplex(problem).status).toBe('optimal');
+    const limited = solveSimplex(problem, { maxIterations: 1 });
+    expect(limited.status).toBe('iteration-limit');
+    expect(limited.solution).toEqual([]);
+    expect(limited.objectiveValue).toBeNull();
+  });
+
+  it('reports the iteration limit during phase 1 too, not as infeasible', () => {
+    const limited = solveSimplex(
+      {
+        variableNames: ['x', 'y'],
+        objective: [1, 1],
+        constraints: [
+          { label: 'a', coefficients: [1, 1], sense: '>=' as const, rhs: 4 },
+          { label: 'b', coefficients: [1, 0], sense: '<=' as const, rhs: 3 },
+        ],
+      },
+      { maxIterations: 0 },
+    );
+    expect(limited.status).toBe('iteration-limit');
+  });
+
   it('terminates on Beale cycling example thanks to Bland rule', () => {
     const r = solveSimplex({
       variableNames: ['x1', 'x2', 'x3', 'x4'],
