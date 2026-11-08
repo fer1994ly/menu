@@ -20,6 +20,11 @@ export default defineConfig({
       include: [
         'src/features/planning/domain/**',
         'src/features/shopping/domain/**',
+        'src/features/orders/domain/**',
+        'src/features/routes/domain/**',
+        'src/features/recipes/domain/**',
+        'src/features/admin/domain/**',
+        'src/shared/kernel/time.ts',
       ],
       exclude: ['**/__tests__/**', '**/*.test.ts'],
       thresholds: { lines: 80, functions: 80, branches: 80, statements: 80 },
