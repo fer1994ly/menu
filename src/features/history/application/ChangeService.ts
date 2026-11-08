@@ -11,7 +11,7 @@ import { validateRecipe, type RecipeEntity } from '@/features/recipes/domain/rec
 import { randomId, type Clock } from '@/shared/kernel/runtime';
 import { closeInstantForWeek, isWeekClosed, weekIdForInstant } from '@/shared/kernel/time';
 import type { SyncBus } from '@/shared/infrastructure/syncChannel';
-import { diffFields } from '../domain/diff';
+import { diffFields, sameData } from '../domain/diff';
 import { CONFLICT_MARKER, createEventId, WHOLE_ENTITY, type EventEntity, type EventKind, type HistoryEvent } from '../domain/event';
 import type { EventStore, SnapshotStore } from './ports';
 
@@ -47,9 +47,26 @@ interface Mutation {
   after: EntityValue | null;
 }
 
+/** A recorded mutation plus the value the store holds since it was last applied (what undo/redo expect to find). */
+interface UndoStep extends Mutation {
+  applied: EntityValue | null;
+}
+
 interface UndoGroup {
   label: string;
-  mutations: Mutation[];
+  mutations: UndoStep[];
+}
+
+/** Result of an undo / redo request. A refused step changed nothing; `message` says why. */
+export type UndoOutcome =
+  | { status: 'done'; label: string }
+  | { status: 'empty' }
+  | { status: 'refused'; message: string };
+
+interface Refusal {
+  message: string;
+  /** Keep the step on its stack (the blocker can go away, e.g. quota) instead of dropping it. */
+  keep: boolean;
 }
 
 export interface UndoState {
@@ -252,46 +269,87 @@ export class ChangeService {
 
   // ---- undo / redo ---------------------------------------------------------
 
-  /** Applies the inverse of the last action and appends `undo` events. */
-  async undo(): Promise<boolean> {
-    const group = this.undoStack.pop();
-    if (!group) return false;
-    await this.applyGroup(group, 'undo');
-    this.redoStack.push(group);
-    this.emitUndoState();
-    return true;
+  /**
+   * Applies the inverse of the last action and appends `undo` events. Refused (nothing
+   * written) when another tab changed the entity since, when the order's week closed,
+   * or when restoring an order no longer fits the quotas.
+   */
+  async undo(): Promise<UndoOutcome> {
+    return this.step('undo');
   }
 
-  async redo(): Promise<boolean> {
-    const group = this.redoStack.pop();
-    if (!group) return false;
-    await this.applyGroup(group, 'redo');
-    this.undoStack.push(group);
+  async redo(): Promise<UndoOutcome> {
+    return this.step('redo');
+  }
+
+  private async step(direction: 'undo' | 'redo'): Promise<UndoOutcome> {
+    const from = direction === 'undo' ? this.undoStack : this.redoStack;
+    const to = direction === 'undo' ? this.redoStack : this.undoStack;
+    const group = from.pop();
+    if (!group) return { status: 'empty' };
+    const refusal = await this.applyGroup(group, direction);
+    if (refusal) {
+      if (refusal.keep) from.push(group);
+      this.emitUndoState();
+      return { status: 'refused', message: refusal.message };
+    }
+    to.push(group);
     this.emitUndoState();
-    return true;
+    return { status: 'done', label: group.label };
   }
 
   // ---- internals -----------------------------------------------------------
 
-  private async applyGroup(group: UndoGroup, direction: 'undo' | 'redo'): Promise<void> {
+  /** Checks every step first and writes only when all of them are safe; returns the refusal otherwise. */
+  private async applyGroup(group: UndoGroup, direction: 'undo' | 'redo'): Promise<Refusal | null> {
     const at = this.deps.clock();
+    const settings = await this.deps.settings.get();
+    const verb = direction === 'undo' ? 'deshacer' : 'rehacer';
     const ordered = direction === 'undo' ? [...group.mutations].reverse() : group.mutations;
-    for (const m of ordered) {
-      const current = await this.read(m.entity, m.entityId);
-      const wanted = direction === 'undo' ? m.before : m.after;
+    const writes: { step: UndoStep; current: EntityValue | null; target: EntityValue | null }[] = [];
+
+    for (const step of ordered) {
+      const current = await this.read(step.entity, step.entityId);
+      if (!sameData(current, step.applied)) {
+        return { message: `No se pudo ${verb}: ${this.describe(step, current)} cambió en otra pestaña después de ese paso. Revisá el Historial; el valor actual no se tocó.`, keep: false };
+      }
+      const wanted = direction === 'undo' ? step.before : step.after;
       let target: EntityValue | null = wanted;
-      if (m.entity === 'order') {
-        const base = (wanted ?? current) as Order | null;
-        if (base === null) continue;
+      if (step.entity === 'order') {
         const stored = current as Order | null;
+        const base = (wanted ?? stored) as Order | null;
+        if (base === null || stored === null) continue;
         target = {
           ...base,
           status: wanted === null ? 'cancelled' : base.status,
-          version: (stored?.version ?? 0) + 1,
+          version: stored.version + 1,
           updatedAt: at,
         };
+        const closed = checkWeekOpen(stored, at, settings.closeTime);
+        if (closed) return { message: `No se pudo ${verb}. ${closed.message}`, keep: false };
+        const full = await this.checkCapacity(stored, target, settings);
+        if (full) return { message: `No se pudo ${verb}. ${full.message}`, keep: true };
       }
-      await this.commit({ entity: m.entity, entityId: m.entityId, before: current, after: target }, direction, at);
+      writes.push({ step, current, target });
+    }
+
+    for (const { step, current, target } of writes) {
+      await this.commit({ entity: step.entity, entityId: step.entityId, before: current, after: target }, direction, at);
+      step.applied = target;
+    }
+    return null;
+  }
+
+  private describe(step: Mutation, current: EntityValue | null): string {
+    switch (step.entity) {
+      case 'order':
+        return `el pedido ${(current as Order | null)?.code ?? step.entityId}`;
+      case 'recipe':
+        return `la receta ${step.entityId}`;
+      case 'settings':
+        return 'los ajustes';
+      case 'menu':
+        return `el menú de la semana ${step.entityId}`;
     }
   }
 
@@ -454,7 +512,7 @@ export class ChangeService {
   }
 
   private record(label: string, mutation: Mutation): void {
-    this.undoStack.push({ label, mutations: [mutation] });
+    this.undoStack.push({ label, mutations: [{ ...mutation, applied: mutation.after }] });
     if (this.undoStack.length > MAX_UNDO_STEPS) this.undoStack.shift();
     this.redoStack = [];
     this.emitUndoState();

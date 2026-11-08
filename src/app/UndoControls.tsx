@@ -29,8 +29,9 @@ export function UndoControls({ compact = false }: { compact?: boolean }) {
       return;
     }
     const label = direction === 'undo' ? state.undoLabel : state.redoLabel;
-    await (direction === 'undo' ? changes.undo() : changes.redo());
-    setMessage(`${direction === 'undo' ? 'Deshecho' : 'Rehecho'}: ${label ?? 'último cambio'}`);
+    const outcome = await (direction === 'undo' ? changes.undo() : changes.redo());
+    if (outcome.status === 'refused') setMessage(outcome.message);
+    else setMessage(`${direction === 'undo' ? 'Deshecho' : 'Rehecho'}: ${label ?? 'último cambio'}`);
   };
 
   const size = compact ? 'px-3' : '';

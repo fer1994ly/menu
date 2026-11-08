@@ -94,10 +94,10 @@ describe('ChangeService: undo / redo', () => {
   it('undoes and redoes a recipe cost change, appending undo and redo events', async () => {
     await tab.changes.saveRecipe({ ...(await tab.recipes.get('R1'))!, cost: 60 });
     tab.clock.now += 1000;
-    expect(await tab.changes.undo()).toBe(true);
+    expect(await tab.changes.undo()).toMatchObject({ status: 'done' });
     expect((await tab.recipes.get('R1'))!.cost).toBe(48.5);
     tab.clock.now += 1000;
-    expect(await tab.changes.redo()).toBe(true);
+    expect(await tab.changes.redo()).toMatchObject({ status: 'done' });
     expect((await tab.recipes.get('R1'))!.cost).toBe(60);
 
     const { events } = await tab.events.query({ entityId: 'R1' });
@@ -138,7 +138,7 @@ describe('ChangeService: undo / redo', () => {
     const state = tab.changes.getUndoState();
     expect(state.canUndo).toBe(false);
     expect(state.undoDisabledReason).toBe(UNDO_EXHAUSTED_MESSAGE);
-    expect(await tab.changes.undo()).toBe(false);
+    expect(await tab.changes.undo()).toEqual({ status: 'empty' });
     expect((await tab.recipes.get('R1'))!.cost).toBe(54);
   });
 
@@ -153,6 +153,6 @@ describe('ChangeService: undo / redo', () => {
     expect(seen).toEqual([false, true, false]);
     tab.changes.resetUndo();
     expect(tab.changes.getUndoState().canUndo).toBe(false);
-    expect(await tab.changes.redo()).toBe(false);
+    expect(await tab.changes.redo()).toEqual({ status: 'empty' });
   });
 });

@@ -143,6 +143,12 @@ export async function createAppServices(options: AppServicesOptions = {}): Promi
     runner,
   });
 
+  // Another tab restored the sample data: this tab's undo history describes data that no longer exists.
+  // (The UI reloads on every bus message, so screens refresh by themselves.)
+  const offReset = bus.subscribe((message) => {
+    if (message.type === 'reset') changes.resetUndo();
+  });
+
   const services: AppServices = {
     tabId,
     clock,
@@ -161,6 +167,7 @@ export async function createAppServices(options: AppServicesOptions = {}): Promi
       return report;
     },
     dispose() {
+      offReset();
       runner.dispose();
       bus.close();
       db.close();

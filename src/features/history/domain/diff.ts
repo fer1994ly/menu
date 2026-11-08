@@ -43,3 +43,18 @@ export function setPath<T>(target: T, path: string, value: unknown): T {
   };
   return apply(target, 0) as T;
 }
+
+/** Deep equality that ignores key order (values are plain JSON data). */
+export function sameData(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((item, i) => sameData(item, b[i]));
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const key of keys) {
+      if (a[key] === undefined && b[key] === undefined) continue;
+      if (!sameData(a[key], b[key])) return false;
+    }
+    return true;
+  }
+  return false;
+}
