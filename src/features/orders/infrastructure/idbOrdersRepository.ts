@@ -74,4 +74,33 @@ export class IdbOrdersRepository implements OrdersRepository {
       throw error;
     }
   }
+
+  async updateAtomically<T>(
+    id: string,
+    decide: (stored: Order | undefined, others: readonly Order[]) => { write: Order | null; result: T },
+  ): Promise<T> {
+    const tx = this.db.transaction('orders', 'readwrite');
+    const done = tx.done.catch(() => undefined);
+    try {
+      const orders = tx.objectStore('orders');
+      const stored = (await orders.get(id)) as Order | undefined;
+      const sameWeek = stored ? await orders.index('weekId').getAll(stored.weekId) : [];
+      // `decide` must stay synchronous: awaiting anything else would let the transaction auto-commit.
+      const { write, result } = decide(
+        stored,
+        sameWeek.filter((order) => order.id !== id),
+      );
+      if (write) await orders.put(write);
+      await tx.done;
+      return result;
+    } catch (error) {
+      try {
+        tx.abort();
+      } catch {
+        // already finished
+      }
+      await done;
+      throw error;
+    }
+  }
 }

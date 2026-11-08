@@ -19,4 +19,14 @@ export interface OrdersRepository {
    * If `decide` throws nothing is written (the number is not consumed).
    */
   placeAtomically(fromWeek: string, decide: (existing: readonly Order[], number: number) => Order): Promise<Order>;
+  /**
+   * Atomic across tabs: in ONE readwrite transaction re-reads the stored order and the other
+   * orders of its week, lets the synchronous `decide` choose (`write` null = write nothing)
+   * and stores the order it returns. Two tabs can never both pass the same quota check.
+   * `stored` is undefined when the order does not exist. If `decide` throws nothing is written.
+   */
+  updateAtomically<T>(
+    id: string,
+    decide: (stored: Order | undefined, others: readonly Order[]) => { write: Order | null; result: T },
+  ): Promise<T>;
 }

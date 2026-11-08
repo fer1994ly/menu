@@ -90,6 +90,12 @@ export type SaveOrderOutcome =
   /** The edit was refused and nothing changed; `message` is the Spanish text for the operator. */
   | ({ status: 'rejected' } & OrderEditRejection);
 
+/** What the atomic edit decided; the events, undo step and notifications follow after the write. */
+type SaveDecision =
+  | { kind: 'rejected'; rejection: OrderEditRejection }
+  | { kind: 'saved'; stored: Order; next: Order }
+  | { kind: 'conflict'; stored: Order; mine: Order; resolution: ConflictResolution; winner: Order };
+
 export interface ChangeServiceDeps {
   orders: OrdersRepository;
   recipes: RecipesRepository;
@@ -177,30 +183,63 @@ export class ChangeService {
    * before the close.
    */
   async saveOrder(loaded: Order, edited: Order): Promise<SaveOrderOutcome> {
-    const stored = await this.deps.orders.get(loaded.id);
-    if (!stored) throw new Error(`Order ${loaded.id} does not exist`);
     const at = this.deps.clock();
     const settings = await this.deps.settings.get();
 
-    if (stored.version === loaded.version) {
-      const closed = checkWeekOpen(stored, at, settings.closeTime);
-      if (closed) return { status: 'rejected', ...closed };
-    }
-    const normalized = this.normalizeEdit(stored, edited, settings);
-    const refused = await this.checkCapacity(stored, normalized, settings);
-    if (refused) return { status: 'rejected', ...refused };
+    // One readwrite transaction: re-read, check (closed week, quotas) and write, so two tabs cannot both pass.
+    const decision = await this.deps.orders.updateAtomically<SaveDecision>(loaded.id, (stored, others) => {
+      if (!stored) throw new Error(`Order ${loaded.id} does not exist`);
+      const current = stored.version === loaded.version;
+      if (current) {
+        const closed = checkWeekOpen(stored, at, settings.closeTime);
+        if (closed) return { write: null, result: { kind: 'rejected', rejection: closed } };
+      }
+      const normalized = this.normalizeEdit(stored, edited, settings);
+      const refused = checkOrderCapacity(stored, normalized, {
+        others,
+        weeklyPortionQuota: settings.weeklyPortionQuota,
+        routeQuotas: settings.routeQuotas,
+      });
+      if (refused) return { write: null, result: { kind: 'rejected', rejection: refused } };
 
-    if (stored.version === loaded.version) {
-      const next: Order = { ...normalized, id: stored.id, version: stored.version + 1, updatedAt: at };
+      if (current) {
+        const next: Order = { ...normalized, id: stored.id, version: stored.version + 1, updatedAt: at };
+        return { write: next, result: { kind: 'saved', stored, next } };
+      }
+      const resolution = resolveOrderConflict({
+        base: loaded,
+        mine: { order: normalized, savedAt: at },
+        theirs: { order: stored, savedAt: stored.updatedAt },
+        closeInstant: closeInstantForWeek(stored.weekId, settings.closeTime),
+        now: at,
+      });
+      const winner: Order =
+        resolution.winnerSide === 'theirs' ? stored : { ...resolution.winner, id: stored.id, version: stored.version + 1, updatedAt: at };
+      return {
+        write: resolution.winnerSide === 'theirs' ? null : winner,
+        result: { kind: 'conflict', stored, mine: normalized, resolution, winner },
+      };
+    });
+
+    if (decision.kind === 'rejected') return { status: 'rejected', ...decision.rejection };
+    if (decision.kind === 'saved') {
+      const { stored, next } = decision;
       const mutation: Mutation = { entity: 'order', entityId: stored.id, before: stored, after: next };
-      await this.commit(mutation, 'user', at);
+      await this.commit(mutation, 'user', at, undefined, true);
       this.record(
         next.status === 'cancelled' && stored.status !== 'cancelled' ? `Pedido ${next.code} cancelado` : `Pedido ${next.code} modificado`,
         mutation,
       );
       return { status: 'saved', order: next };
     }
-    return this.resolveConflict(loaded, normalized, stored, at);
+    await this.commit(
+      { entity: 'order', entityId: decision.stored.id, before: decision.stored, after: decision.winner },
+      'conflict',
+      at,
+      { resolution: decision.resolution, mine: decision.mine, theirs: decision.stored },
+      true,
+    );
+    return { status: 'conflict', order: decision.winner, resolution: decision.resolution };
   }
 
   /** Portions always follow the plan; the route surcharge follows the route (kept while the route is unchanged). */
@@ -311,6 +350,12 @@ export class ChangeService {
     const ordered = direction === 'undo' ? [...group.mutations].reverse() : group.mutations;
     const writes: { step: UndoStep; current: EntityValue | null; target: EntityValue | null }[] = [];
 
+    // Every group holds one mutation; an order is restored with check and write in ONE transaction.
+    const only = group.mutations[0];
+    if (group.mutations.length === 1 && only?.entity === 'order') {
+      return this.applyOrderStepAtomically(only, direction, at, settings);
+    }
+
     for (const step of ordered) {
       const current = await this.read(step.entity, step.entityId);
       if (!sameData(current, step.applied)) {
@@ -330,7 +375,7 @@ export class ChangeService {
         };
         const closed = checkWeekOpen(stored, at, settings.closeTime);
         if (closed) return { message: `No se pudo ${verb}. ${closed.message}`, keep: false };
-        const full = await this.checkCapacity(stored, target, settings);
+        const full = await this.checkCapacity(stored, target as Order, settings);
         if (full) return { message: `No se pudo ${verb}. ${full.message}`, keep: true };
       }
       writes.push({ step, current, target });
@@ -340,6 +385,46 @@ export class ChangeService {
       await this.commit({ entity: step.entity, entityId: step.entityId, before: current, after: target }, direction, at);
       step.applied = target;
     }
+    return null;
+  }
+
+  /** Undo / redo of one order: the same checks as `applyGroup`, but re-read, checked and written atomically. */
+  private async applyOrderStepAtomically(
+    step: UndoStep,
+    direction: 'undo' | 'redo',
+    at: number,
+    settings: Settings,
+  ): Promise<Refusal | null> {
+    const verb = direction === 'undo' ? 'deshacer' : 'rehacer';
+    const wanted = (direction === 'undo' ? step.before : step.after) as Order | null;
+    type Restore = { refusal: Refusal } | { before: Order; target: Order } | { skip: true };
+    const restore = await this.deps.orders.updateAtomically<Restore>(step.entityId, (stored, others) => {
+      if (!sameData(stored ?? null, step.applied)) {
+        const message = `No se pudo ${verb}: ${this.describe(step, stored ?? null)} cambió en otra pestaña después de ese paso. Revisá el Historial; el valor actual no se tocó.`;
+        return { write: null, result: { refusal: { message, keep: false } } };
+      }
+      const base = wanted ?? stored;
+      if (!base || !stored) return { write: null, result: { skip: true } };
+      const target: Order = {
+        ...base,
+        status: wanted === null ? 'cancelled' : base.status,
+        version: stored.version + 1,
+        updatedAt: at,
+      };
+      const closed = checkWeekOpen(stored, at, settings.closeTime);
+      if (closed) return { write: null, result: { refusal: { message: `No se pudo ${verb}. ${closed.message}`, keep: false } } };
+      const full = checkOrderCapacity(stored, target, {
+        others,
+        weeklyPortionQuota: settings.weeklyPortionQuota,
+        routeQuotas: settings.routeQuotas,
+      });
+      if (full) return { write: null, result: { refusal: { message: `No se pudo ${verb}. ${full.message}`, keep: true } } };
+      return { write: target, result: { before: stored, target } };
+    });
+    if ('refusal' in restore) return restore.refusal;
+    if ('skip' in restore) return null;
+    await this.commit({ entity: 'order', entityId: step.entityId, before: restore.before, after: restore.target }, direction, at, undefined, true);
+    step.applied = restore.target;
     return null;
   }
 
@@ -354,31 +439,6 @@ export class ChangeService {
       case 'menu':
         return `el menú de la semana ${step.entityId}`;
     }
-  }
-
-  private async resolveConflict(loaded: Order, edited: Order, stored: Order, at: number): Promise<SaveOrderOutcome> {
-    const closeInstant = await this.closeInstantFor(stored.weekId);
-    const resolution = resolveOrderConflict({
-      base: loaded,
-      mine: { order: edited, savedAt: at },
-      theirs: { order: stored, savedAt: stored.updatedAt },
-      closeInstant,
-      now: at,
-    });
-    const winner: Order =
-      resolution.winnerSide === 'theirs' ? stored : { ...resolution.winner, id: stored.id, version: stored.version + 1, updatedAt: at };
-    await this.commit(
-      { entity: 'order', entityId: stored.id, before: stored, after: winner },
-      'conflict',
-      at,
-      { resolution, mine: edited, theirs: stored },
-    );
-    return { status: 'conflict', order: winner, resolution };
-  }
-
-  private async closeInstantFor(weekId: string): Promise<number> {
-    const settings = await this.deps.settings.get();
-    return closeInstantForWeek(weekId, settings.closeTime);
   }
 
   private async commit(
