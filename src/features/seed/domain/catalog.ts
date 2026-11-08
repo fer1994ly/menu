@@ -1,0 +1,91 @@
+import type { Recipe } from '@/features/planning/domain/types';
+
+/** The six test recipes of the briefing catalog (R1–R6). */
+export const BRIEFING_RECIPES: readonly Recipe[] = [
+  { code: 'R1', name: 'Pollo a la mostaza con arroz', kcal: 520, protein: 42, cost: 48.5, chickenG: 180, beefG: 0, glutenFree: true },
+  { code: 'R2', name: 'Picadillo de res con verduras', kcal: 480, protein: 35, cost: 56, chickenG: 0, beefG: 160, glutenFree: true },
+  { code: 'R3', name: 'Pasta integral a la boloñesa', kcal: 610, protein: 33, cost: 41, chickenG: 0, beefG: 110, glutenFree: false },
+  { code: 'R4', name: 'Tinga de pollo con frijoles', kcal: 550, protein: 38, cost: 39.5, chickenG: 140, beefG: 0, glutenFree: true },
+  { code: 'R5', name: 'Salmón teriyaki con quinoa', kcal: 500, protein: 34, cost: 89, chickenG: 0, beefG: 0, glutenFree: false },
+  { code: 'R6', name: 'Enchiladas verdes de pollo', kcal: 590, protein: 36, cost: 37, chickenG: 120, beefG: 0, glutenFree: true },
+];
+
+export type RecipeMeat = 'chicken' | 'beef' | 'none';
+
+/** Extended recipe book R7–R66: northern Mexican and healthy cuisine. */
+export const EXTENDED_RECIPE_NAMES: ReadonlyArray<readonly [string, RecipeMeat]> = [
+  ['Bowl de pollo al chipotle', 'chicken'],
+  ['Pollo asado con calabacitas', 'chicken'],
+  ['Pechuga rellena de espinacas', 'chicken'],
+  ['Pollo en salsa verde con arroz integral', 'chicken'],
+  ['Caldo tlalpeño de pollo', 'chicken'],
+  ['Tacos de pollo al pastor ligeros', 'chicken'],
+  ['Pollo con mole poblano ligero', 'chicken'],
+  ['Pollo a la plancha con nopales', 'chicken'],
+  ['Fajitas de pollo con pimientos', 'chicken'],
+  ['Pozole blanco de pollo', 'chicken'],
+  ['Pollo almendrado con verduras', 'chicken'],
+  ['Ensalada de pollo y aguacate', 'chicken'],
+  ['Pollo al limón con ejotes', 'chicken'],
+  ['Albóndigas de pollo en chipotle', 'chicken'],
+  ['Pollo adobado con camote', 'chicken'],
+  ['Machacado con huevo y nopales', 'beef'],
+  ['Discada ligera', 'beef'],
+  ['Arrachera con calabacitas', 'beef'],
+  ['Carne asada con ensalada de nopales', 'beef'],
+  ['Bistec a la mexicana', 'beef'],
+  ['Caldo de res con verduras', 'beef'],
+  ['Tampiqueña ligera', 'beef'],
+  ['Chile colorado de res ligero', 'beef'],
+  ['Albóndigas de res al chipotle', 'beef'],
+  ['Burrito de arrachera integral', 'beef'],
+  ['Carne deshebrada con frijoles', 'beef'],
+  ['Costilla en salsa roja ligera', 'beef'],
+  ['Res guisada con papas', 'beef'],
+  ['Tacos de bistec en lechuga', 'beef'],
+  ['Carne en su jugo ligera', 'beef'],
+  ['Pescado zarandeado', 'none'],
+  ['Filete de pescado al ajillo', 'none'],
+  ['Tacos de pescado a la plancha', 'none'],
+  ['Ceviche de pescado con tostadas horneadas', 'none'],
+  ['Camarones al mojo de ajo', 'none'],
+  ['Atún sellado con quinoa', 'none'],
+  ['Salmón al horno con espárragos', 'none'],
+  ['Tilapia a la veracruzana', 'none'],
+  ['Aguachile de camarón', 'none'],
+  ['Huevo a la mexicana con frijoles', 'none'],
+  ['Chilaquiles verdes con huevo', 'none'],
+  ['Omelette de nopales', 'none'],
+  ['Enfrijoladas con queso panela', 'none'],
+  ['Tinga de champiñones', 'none'],
+  ['Bowl de lentejas y verduras', 'none'],
+  ['Ensalada de garbanzo y aguacate', 'none'],
+  ['Tacos de coliflor al pastor', 'none'],
+  ['Berenjena rellena de quinoa', 'none'],
+  ['Calabacitas con elote', 'none'],
+  ['Crema de poblano ligera', 'none'],
+  ['Tostadas de nopal con frijol', 'none'],
+  ['Pasta integral con verduras asadas', 'none'],
+  ['Arroz con verduras y huevo', 'none'],
+  ['Sopa de lentejas con espinacas', 'none'],
+  ['Frijoles charros ligeros', 'none'],
+  ['Tofu a la mexicana', 'none'],
+  ['Tamal de rajas horneado', 'none'],
+  ['Burrito de frijol y queso', 'none'],
+  ['Cerdo en salsa verde ligero', 'none'],
+  ['Lomo de cerdo con piña asada', 'none'],
+];
+
+export const FIRST_NAMES: readonly string[] = [
+  'María', 'José', 'Guadalupe', 'Juan', 'Fernanda', 'Luis', 'Alejandra', 'Carlos', 'Daniela', 'Jorge',
+  'Valeria', 'Miguel', 'Mariana', 'Ricardo', 'Karla', 'Eduardo', 'Paola', 'Fernando', 'Andrea', 'Roberto',
+  'Lucía', 'Sergio', 'Gabriela', 'Héctor', 'Ximena', 'Arturo', 'Patricia', 'Rodrigo', 'Claudia', 'Iván',
+  'Sofía', 'Gerardo', 'Verónica', 'Alberto', 'Regina', 'Omar', 'Cecilia', 'Raúl', 'Diana', 'Emilio',
+];
+
+export const LAST_NAMES: readonly string[] = [
+  'García', 'Hernández', 'Martínez', 'López', 'González', 'Rodríguez', 'Pérez', 'Sánchez', 'Ramírez', 'Flores',
+  'Treviño', 'Garza', 'Cavazos', 'Elizondo', 'Villarreal', 'Leal', 'Salinas', 'Guajardo', 'Cantú', 'Saldívar',
+  'Ibarra', 'Montemayor', 'Ayala', 'Benavides', 'Quintanilla', 'Rangel', 'Lozano', 'Zambrano', 'Cárdenas', 'Páez',
+  'Domínguez', 'Mendoza', 'Rivera', 'Aguirre', 'Navarro', 'Escobedo', 'Garduño', 'Ochoa', 'Vela', 'Orozco',
+];
