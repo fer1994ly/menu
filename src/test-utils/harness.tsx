@@ -104,3 +104,9 @@ export function renderApp(services: AppServices, route = '/') {
     </AppServicesProvider>,
   );
 }
+
+/** Cancels `count` confirmed, non-gluten-free plan-5 orders of the week (to reshape D without changing G). */
+export async function cancelPlan5Orders(services: AppServices, count: number): Promise<void> {
+  const orders = (await services.repos.orders.listByWeek(WEEK)).filter((o) => o.plan === 5 && !o.glutenFree && o.status === 'confirmed');
+  await services.repos.orders.putMany(orders.slice(0, count).map((o) => ({ ...o, status: 'cancelled' as const })));
+}
