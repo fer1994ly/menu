@@ -129,6 +129,7 @@ export async function createAppServices(options: AppServicesOptions = {}): Promi
     clock,
     user: () => session.get(),
     tabId,
+    bus,
   });
   changes.addChangeListener(plans.onChange);
   const orders = new OrderService({ orders: repos.orders, clients: repos.clients, settings: repos.settings, changes, clock });

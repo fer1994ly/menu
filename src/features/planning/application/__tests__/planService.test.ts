@@ -5,12 +5,15 @@ import { InlinePlanRunner } from '../../infrastructure/planWorkerClient';
 import { IdbPlansRepository } from '../../infrastructure/idbPlanningRepositories';
 import { PlanService } from '../PlanService';
 import type { PlanRunner } from '../ports';
+import { InMemorySyncHub } from '@/shared/infrastructure/syncChannel';
 import { runPlanJob } from '../planJob';
 
 const WEEK = '2026-11-15';
 const PREVIOUS = '2026-11-08';
 
 interface Rig {
+  /** What a second tab receives from the first one's bus, in order. */
+  received: string[];
   tab: TestTab;
   plans: PlanService;
   repo: IdbPlansRepository;
@@ -18,7 +21,10 @@ interface Rig {
 
 /** Briefing scenario: 40 plan-5 + 10 plan-10 orders (D = 300), 5 gluten-free plan-5 (G = 25). */
 async function briefingRig(wrap?: (runner: InlinePlanRunner, tab: TestTab) => PlanRunner): Promise<Rig> {
-  const tab = await createTestTab({ dbName: uniqueDbName() });
+  const hub = new InMemorySyncHub();
+  const received: string[] = [];
+  hub.connect().subscribe((m) => received.push(`${m.type}:${m.entity}:${m.id}`));
+  const tab = await createTestTab({ dbName: uniqueDbName(), hub });
   await seedBasics(tab);
   await tab.menus.putMany([
     { weekId: PREVIOUS, recipeCodes: ['R7', 'R8', 'R9', 'R10', 'R11', 'R12'] },
@@ -43,13 +49,14 @@ async function briefingRig(wrap?: (runner: InlinePlanRunner, tab: TestTab) => Pl
     settings: tab.settings,
     plans: repo,
     events: tab.events,
+    bus: hub.connect(),
     runner: wrap ? wrap(new InlinePlanRunner(), tab) : new InlinePlanRunner(),
     clock: () => tab.clock.now,
     user: () => 'Ana',
     tabId: 'tab-a',
   });
   tab.changes.addChangeListener(plans.onChange);
-  return { tab, plans, repo };
+  return { received, tab, plans, repo };
 }
 
 const portionsOf = (record: { outcome: { status: string; integer?: { portions: number }[] } }): number[] =>
@@ -213,6 +220,37 @@ describe('PlanService.calculate racing with a change', () => {
 
     await plans.calculate(WEEK);
     expect((await repo.get(WEEK))!.stale).toBe(false);
+  });
+});
+
+describe('cross-tab announcements', () => {
+  it('announces a calculated plan and a history recalculation as «changed» on entity plan', async () => {
+    const { plans, received } = await briefingRig();
+    await plans.calculate(WEEK);
+    expect(received).toEqual([`changed:plan:${WEEK}`]);
+    await plans.recalculateHistory();
+    expect(received).toEqual([`changed:plan:${WEEK}`, `changed:plan:${WEEK}`]);
+  });
+
+  it('does not announce a failed calculation that kept the previous plan untouched', async () => {
+    const { plans, received, tab } = await briefingRig();
+    await plans.calculate(WEEK);
+    await tab.changes.saveMenu({ weekId: WEEK, recipeCodes: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6'], chickenCapG: 10000, beefCapG: 20000 });
+    received.length = 0;
+    expect((await plans.calculate(WEEK)).ok).toBe(false);
+    expect(received).toEqual([]);
+  });
+
+  it('announces a change only after the listeners (stale flags) finished', async () => {
+    const { tab, plans, received } = await briefingRig();
+    await plans.calculate(WEEK);
+    received.length = 0;
+    tab.changes.addChangeListener(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      received.push('listener-done');
+    });
+    await tab.changes.saveRecipe({ ...(await tab.recipes.get('R1'))!, cost: 70 });
+    expect(received).toEqual(['listener-done', 'changed:recipe:R1']);
   });
 });
 

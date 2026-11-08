@@ -331,16 +331,6 @@ export class ChangeService {
     const events = this.buildEvents(m, origin, at, conflict);
     await this.deps.events.append(events);
 
-    const order = m.after && m.entity === 'order' ? (m.after as Order) : null;
-    this.deps.bus.publish({
-      type: origin === 'conflict' ? 'conflict' : 'changed',
-      entity: m.entity,
-      id: m.entityId,
-      version: order?.version ?? 0,
-      savedAt: at,
-      tabId: this.deps.tabId,
-    });
-
     const summary: ChangeSummary = {
       ...m,
       user: this.deps.user(),
@@ -348,7 +338,20 @@ export class ChangeService {
       at: new Date(at).toISOString(),
       origin,
     };
-    for (const listener of this.listeners) await listener(summary);
+    try {
+      for (const listener of this.listeners) await listener(summary);
+    } finally {
+      // Tell the other tabs only now (even if a listener failed): their reload must see the stale flags the listeners wrote.
+      const order = m.after && m.entity === 'order' ? (m.after as Order) : null;
+      this.deps.bus.publish({
+        type: origin === 'conflict' ? 'conflict' : 'changed',
+        entity: m.entity,
+        id: m.entityId,
+        version: order?.version ?? 0,
+        savedAt: at,
+        tabId: this.deps.tabId,
+      });
+    }
     return events;
   }
 

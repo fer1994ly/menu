@@ -4,6 +4,7 @@ import type { EventStore } from '@/features/history/application/ports';
 import { createEventId, type HistoryEvent } from '@/features/history/domain/event';
 import type { OrdersRepository } from '@/features/orders/application/ports';
 import type { RecipesRepository } from '@/features/recipes/application/ports';
+import type { SyncBus } from '@/shared/infrastructure/syncChannel';
 import { randomId, type Clock } from '@/shared/kernel/runtime';
 import type { PlanFailure, PlanResult, PlanSuccess } from '../domain/planProduction';
 import type { PlanRecord } from '../domain/planRecord';
@@ -35,6 +36,8 @@ export interface PlanServiceDeps {
   clock: Clock;
   user: () => string;
   tabId: string;
+  /** Tells the other tabs when a plan was written. */
+  bus: SyncBus;
 }
 
 export class PlanService {
@@ -82,7 +85,10 @@ export class PlanService {
     const previous = (await this.deps.plans.get(weekId)) ?? null;
 
     if (result.status !== 'optimal') {
-      if (previous === null) await this.deps.plans.put(this.toRecord(weekId, built, result));
+      if (previous === null) {
+        await this.deps.plans.put(this.toRecord(weekId, built, result));
+        this.announce(weekId, this.deps.clock());
+      }
       return { ok: false, failure: result, kept: previous, elapsedMs };
     }
 
@@ -94,6 +100,7 @@ export class PlanService {
     };
     await this.deps.plans.put(record);
     await this.deps.events.append([this.calculatedEvent(weekId, previous, record)]);
+    this.announce(weekId, record.computedAt);
     return { ok: true, record, result, elapsedMs };
   }
 
@@ -136,6 +143,7 @@ export class PlanService {
     }
     await this.deps.plans.putMany(records);
     await this.deps.events.append(events);
+    for (const record of records) this.announce(record.weekId, record.computedAt);
     // `records` holds the plans that were written; weeks without a feasible plan keep the previous one.
     return { records, elapsedMs, weeksRecalculated: results.length };
   }
@@ -170,6 +178,10 @@ export class PlanService {
     await this.deps.plans.putMany(updated);
     await this.deps.events.append(events);
   };
+
+  private announce(weekId: string, savedAt: number): void {
+    this.deps.bus.publish({ type: 'changed', entity: 'plan', id: weekId, version: 0, savedAt, tabId: this.deps.tabId });
+  }
 
   private toRecord(weekId: string, built: BuiltPlanInput, result: PlanResult | ReturnType<typeof stripTraces>): PlanRecord {
     const outcome = 'traces' in result ? stripTraces(result) : result;
