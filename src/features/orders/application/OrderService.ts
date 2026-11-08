@@ -32,22 +32,24 @@ export class OrderService {
     if (!client) throw new UnknownClientError(request.clientId);
     const settings = await this.deps.settings.get();
     const now = this.deps.clock();
-    const existingOrders = await this.deps.orders.listFromWeek(weekIdForInstant(now, settings.closeTime));
-    const number = await this.deps.orders.nextOrderNumber();
-    const padded = String(number).padStart(6, '0');
-
-    const result = placeOrder(
-      { ...request, id: `o-${padded}`, code: `P-${padded}`, clientName: client.name },
-      {
-        now,
-        existingOrders,
-        weeklyPortionQuota: settings.weeklyPortionQuota,
-        routeQuotas: settings.routeQuotas,
-        routeChargesCents: { open: 0, morning: settings.routeChargeCents, afternoon: settings.routeChargeCents },
-        closeTime: settings.closeTime,
-      },
-    );
-    await this.deps.changes.createOrder(result.order);
+    let result!: PlaceOrderResult;
+    // Quota check and write share one transaction, so a concurrent tab cannot take the last slot in between.
+    const order = await this.deps.orders.placeAtomically(weekIdForInstant(now, settings.closeTime), (existingOrders, number) => {
+      const padded = String(number).padStart(6, '0');
+      result = placeOrder(
+        { ...request, id: `o-${padded}`, code: `P-${padded}`, clientName: client.name },
+        {
+          now,
+          existingOrders,
+          weeklyPortionQuota: settings.weeklyPortionQuota,
+          routeQuotas: settings.routeQuotas,
+          routeChargesCents: { open: 0, morning: settings.routeChargeCents, afternoon: settings.routeChargeCents },
+          closeTime: settings.closeTime,
+        },
+      );
+      return result.order;
+    });
+    await this.deps.changes.createOrder(order, { alreadyStored: true });
     return result;
   }
 }

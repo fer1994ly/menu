@@ -154,11 +154,14 @@ export class ChangeService {
 
   // ---- orders --------------------------------------------------------------
 
-  /** Persists a new order produced by `placeOrder`. */
-  async createOrder(order: Order): Promise<Order> {
+  /**
+   * Persists a new order produced by `placeOrder`. `alreadyStored` is for orders written by
+   * `OrdersRepository.placeAtomically`: only the events, undo step and notifications are added.
+   */
+  async createOrder(order: Order, options: { alreadyStored?: boolean } = {}): Promise<Order> {
     const at = this.deps.clock();
     const mutation: Mutation = { entity: 'order', entityId: order.id, before: null, after: order };
-    await this.commit(mutation, 'user', at);
+    await this.commit(mutation, 'user', at, undefined, options.alreadyStored === true);
     this.record(`Pedido ${order.code} creado`, mutation);
     return order;
   }
@@ -383,9 +386,10 @@ export class ChangeService {
     origin: ChangeOrigin,
     at: number,
     conflict?: { resolution: ConflictResolution; mine: Order; theirs: Order },
+    alreadyStored = false,
   ): Promise<HistoryEvent[]> {
     await this.ensureSnapshot(at);
-    await this.persist(m);
+    if (!alreadyStored) await this.persist(m);
     const events = this.buildEvents(m, origin, at, conflict);
     await this.deps.events.append(events);
 
