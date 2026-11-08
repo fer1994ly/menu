@@ -84,7 +84,7 @@ export class PlanService {
   }
 
   /** Recalculates the stored weeks (default: every week with a plan) in the worker. */
-  async recalculateHistory(weekIds?: readonly string[]): Promise<{ records: PlanRecord[]; elapsedMs: number }> {
+  async recalculateHistory(weekIds?: readonly string[]): Promise<{ records: PlanRecord[]; elapsedMs: number; weeksRecalculated: number }> {
     const [orders, recipes, menus, settings] = await Promise.all([
       this.deps.orders.listAll(),
       this.deps.recipes.list(),
@@ -122,7 +122,8 @@ export class PlanService {
     }
     await this.deps.plans.putMany(records);
     await this.deps.events.append(events);
-    return { records, elapsedMs };
+    // `records` holds the plans that were written; weeks without a feasible plan keep the previous one.
+    return { records, elapsedMs, weeksRecalculated: results.length };
   }
 
   /** Full result with simplex traces, recomputed from the stored input (explanation screen). */

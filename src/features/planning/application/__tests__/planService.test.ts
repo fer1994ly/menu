@@ -190,8 +190,9 @@ describe('runPlanJob and runners', () => {
   it('recalculateHistory persists every stored week', async () => {
     const { plans, repo } = await briefingRig();
     await plans.calculate(WEEK);
-    const { records } = await plans.recalculateHistory();
+    const { records, weeksRecalculated } = await plans.recalculateHistory();
     expect(records).toHaveLength(1);
+    expect(weeksRecalculated).toBe(1);
     expect((await repo.list()).map((r) => r.weekId)).toEqual([WEEK]);
   });
 });

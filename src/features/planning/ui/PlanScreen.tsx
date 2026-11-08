@@ -26,8 +26,7 @@ function RecalculateHistory() {
     setResult(null);
     setError(null);
     try {
-      const { records, elapsedMs } = await plans.recalculateHistory();
-      const n = records.length;
+      const { weeksRecalculated: n, elapsedMs } = await plans.recalculateHistory();
       setResult(`${n === 1 ? '1 semana recalculada' : `${n} semanas recalculadas`} en ${formatDecimal(elapsedMs, 0)} ms`);
       reload();
     } catch (e) {
