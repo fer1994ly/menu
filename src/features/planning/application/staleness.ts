@@ -1,49 +1,11 @@
-import type { Settings } from '@/features/admin/domain/settings';
 import type { Order } from '@/features/orders/domain/order';
-import type { RecipeEntity } from '@/features/recipes/domain/recipe';
-import { nextWeekId } from '@/shared/kernel/time';
 import type { ChangeSummary } from '@/features/history/application/ChangeService';
-import type { WeekMenu } from '../domain/menu';
+import type { PlanInput } from '../domain/planProduction';
 import type { PlanRecord } from '../domain/planRecord';
-import type { Recipe } from '../domain/types';
+import { buildPlanInput, hashPlanInput, type PlanningState } from './buildPlanInput';
 
-const RECIPE_FIELDS = ['kcal', 'protein', 'cost', 'chickenG', 'beefG', 'glutenFree'] as const;
-const PRODUCTION_FIELDS = ['minShare', 'maxShare', 'kcalMin', 'kcalMax', 'proteinMin'] as const;
-
-function recipeAffects(record: PlanRecord, change: ChangeSummary): boolean {
-  const used: Recipe | undefined = record.input.recipes.find((r) => r.code === change.entityId);
-  if (!used) return false;
-  const after = change.after as RecipeEntity | null;
-  if (after === null || !after.active) return true;
-  return RECIPE_FIELDS.some((field) => used[field] !== after[field]);
-}
-
-function settingsAffects(record: PlanRecord, change: ChangeSummary): boolean {
-  const after = change.after as Settings;
-  const used = record.input.settings ?? {};
-  if (PRODUCTION_FIELDS.some((field) => used[field] !== undefined && used[field] !== after[field])) return true;
-  if (record.capSource.chicken === 'settings' && record.input.chickenCapG !== after.chickenCapG) return true;
-  return record.capSource.beef === 'settings' && record.input.beefCapG !== after.beefCapG;
-}
-
-function menuAffects(record: PlanRecord, change: ChangeSummary): boolean {
-  const after = change.after as WeekMenu | null;
-  if (change.entityId === record.weekId) {
-    const codes = new Set(after?.recipeCodes ?? []);
-    const used = record.input.recipes.map((r) => r.code);
-    if (used.length !== codes.size || used.some((code) => !codes.has(code))) return true;
-    const chicken = after?.chickenCapG ?? record.input.chickenCapG;
-    const beef = after?.beefCapG ?? record.input.beefCapG;
-    return chicken !== record.input.chickenCapG || beef !== record.input.beefCapG;
-  }
-  if (nextWeekId(change.entityId) === record.weekId) {
-    // The menu of the previous week feeds the rotation of this one.
-    const blocked = new Set(record.input.blockedCodes ?? []);
-    const next = new Set(after?.recipeCodes ?? []);
-    return blocked.size !== next.size || [...next].some((code) => !blocked.has(code));
-  }
-  return false;
-}
+/** What the next plan of any week would be built from, without orders (see {@link isPlanAffected}). */
+export type PlanningConfig = Omit<PlanningState, 'orders'>;
 
 const contribution = (order: Order | null): { portions: number; gluten: number } =>
   order && order.status === 'confirmed'
@@ -60,16 +22,25 @@ function orderAffects(record: PlanRecord, change: ChangeSummary): boolean {
   return was.portions !== now.portions || was.gluten !== now.gluten;
 }
 
-/** True when the change alters something the stored plan was computed from. */
-export function isPlanAffected(record: PlanRecord, change: ChangeSummary): boolean {
-  switch (change.entity) {
-    case 'recipe':
-      return recipeAffects(record, change);
-    case 'settings':
-      return settingsAffects(record, change);
-    case 'menu':
-      return menuAffects(record, change);
-    case 'order':
-      return orderAffects(record, change);
-  }
+/** The recipe name is cosmetic: renaming a recipe never makes a plan stale. */
+const withoutNames = (input: PlanInput): PlanInput => ({
+  ...input,
+  recipes: input.recipes.map((recipe) => ({ ...recipe, name: '' })),
+});
+
+/**
+ * Recipes, settings and menus: rebuild the input the NEXT plan of the week would
+ * use (inactive or missing recipes dropped, menu caps falling back to the settings
+ * caps, previous-week rotation, production bands) and compare it with the stored
+ * one. Orders do not depend on these entities, so the stored D and G are reused.
+ */
+function configAffects(record: PlanRecord, config: PlanningConfig): boolean {
+  const { input } = buildPlanInput(record.weekId, { ...config, orders: [] });
+  const next = { ...input, totalPortions: record.input.totalPortions, glutenFreePortions: record.input.glutenFreePortions };
+  return hashPlanInput(withoutNames(next)) !== hashPlanInput(withoutNames(record.input));
+}
+
+/** True when the change alters something the stored plan was computed from. `config` is read AFTER the change. */
+export function isPlanAffected(record: PlanRecord, change: ChangeSummary, config: PlanningConfig): boolean {
+  return change.entity === 'order' ? orderAffects(record, change) : configAffects(record, config);
 }

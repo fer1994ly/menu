@@ -4,6 +4,7 @@ import { MESSAGES } from '@/features/planning/domain/types';
 import { InlinePlanRunner } from '../../infrastructure/planWorkerClient';
 import { IdbPlansRepository } from '../../infrastructure/idbPlanningRepositories';
 import { PlanService } from '../PlanService';
+import type { PlanRunner } from '../ports';
 import { runPlanJob } from '../planJob';
 
 const WEEK = '2026-11-15';
@@ -16,7 +17,7 @@ interface Rig {
 }
 
 /** Briefing scenario: 40 plan-5 + 10 plan-10 orders (D = 300), 5 gluten-free plan-5 (G = 25). */
-async function briefingRig(): Promise<Rig> {
+async function briefingRig(wrap?: (runner: InlinePlanRunner, tab: TestTab) => PlanRunner): Promise<Rig> {
   const tab = await createTestTab({ dbName: uniqueDbName() });
   await seedBasics(tab);
   await tab.menus.putMany([
@@ -42,7 +43,7 @@ async function briefingRig(): Promise<Rig> {
     settings: tab.settings,
     plans: repo,
     events: tab.events,
-    runner: new InlinePlanRunner(),
+    runner: wrap ? wrap(new InlinePlanRunner(), tab) : new InlinePlanRunner(),
     clock: () => tab.clock.now,
     user: () => 'Ana',
     tabId: 'tab-a',
@@ -151,6 +152,33 @@ describe('plan staleness', () => {
     expect((await repo.get(WEEK))!.stale).toBe(true);
   });
 
+  it('flags a recipe that is in the week menu but was missing or inactive when the plan was computed', async () => {
+    const { plans, repo, tab } = await briefingRig();
+    const menu = { weekId: WEEK, recipeCodes: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R13'], chickenCapG: 26000, beefCapG: 20000 };
+    await tab.menus.put(menu);
+    await tab.recipes.put({ ...(await tab.recipes.get('R1'))!, code: 'R14', active: false });
+    await tab.menus.put({ ...menu, recipeCodes: [...menu.recipeCodes, 'R14'] });
+    await plans.calculate(WEEK);
+    expect((await plans.getRecord(WEEK))!.input.recipes).toHaveLength(6);
+
+    await tab.changes.saveRecipe({ ...(await tab.recipes.get('R1'))!, code: 'R13', name: 'Nueva' });
+    expect((await repo.get(WEEK))!.stale).toBe(true);
+
+    await plans.calculate(WEEK);
+    expect((await repo.get(WEEK))!.stale).toBe(false);
+    await tab.changes.saveRecipe({ ...(await tab.recipes.get('R14'))!, active: true });
+    expect((await repo.get(WEEK))!.stale).toBe(true);
+  });
+
+  it('flags removing a menu-level cap when the settings cap differs', async () => {
+    const { plans, repo, tab } = await briefingRig();
+    await tab.changes.saveSettings({ ...DEFAULT_SETTINGS, chickenCapG: 30000 });
+    await plans.calculate(WEEK);
+    expect((await repo.get(WEEK))!.stale).toBe(false);
+    await tab.changes.saveMenu({ weekId: WEEK, recipeCodes: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6'], beefCapG: 20000 });
+    expect((await repo.get(WEEK))!.stale).toBe(true);
+  });
+
   it('flags order changes inside the week only', async () => {
     const { plans, repo, tab } = await briefingRig();
     await plans.calculate(WEEK);
@@ -159,6 +187,32 @@ describe('plan staleness', () => {
     const loaded = (await tab.orders.get('o-10'))!;
     await tab.changes.cancelOrder(loaded);
     expect((await repo.get(WEEK))!.stale).toBe(true);
+  });
+});
+
+describe('PlanService.calculate racing with a change', () => {
+  it('stores the plan as stale when something it depends on changed while the worker ran', async () => {
+    let racing = false;
+    const { plans, repo } = await briefingRig((inner, t) => ({
+      planWeek: async (input) => {
+        const out = await inner.planWeek(input);
+        if (racing) {
+          racing = false;
+          await t.changes.saveRecipe({ ...(await t.recipes.get('R1'))!, cost: 60 });
+        }
+        return out;
+      },
+      recalculateHistory: (inputs) => inner.recalculateHistory(inputs),
+      dispose: () => inner.dispose(),
+    }));
+    racing = true;
+    const outcome = await plans.calculate(WEEK);
+    expect(outcome.ok).toBe(true);
+    expect((await repo.get(WEEK))!.stale).toBe(true);
+    if (outcome.ok) expect(outcome.record.stale).toBe(true);
+
+    await plans.calculate(WEEK);
+    expect((await repo.get(WEEK))!.stale).toBe(false);
   });
 });
 

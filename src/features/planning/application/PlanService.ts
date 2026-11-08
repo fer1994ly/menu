@@ -10,7 +10,7 @@ import type { PlanRecord } from '../domain/planRecord';
 import { buildPlanInput, hashPlanInput, type BuiltPlanInput, type PlanningState } from './buildPlanInput';
 import type { MenusRepository, PlanRunner, PlansRepository } from './ports';
 import { stripTraces } from './planJob';
-import { isPlanAffected } from './staleness';
+import { isPlanAffected, type PlanningConfig } from './staleness';
 import { planProduction } from '../domain/planProduction';
 
 export type CalculateOutcome =
@@ -51,6 +51,15 @@ export class PlanService {
     return { orders, recipes, menus, settings };
   }
 
+  private async loadConfig(): Promise<PlanningConfig> {
+    const [recipes, menus, settings] = await Promise.all([
+      this.deps.recipes.list(),
+      this.deps.menus.list(),
+      this.deps.settings.get(),
+    ]);
+    return { recipes, menus, settings };
+  }
+
   async buildInput(weekId: string): Promise<BuiltPlanInput> {
     return buildPlanInput(weekId, await this.loadState(weekId));
   }
@@ -77,7 +86,12 @@ export class PlanService {
       return { ok: false, failure: result, kept: previous, elapsedMs };
     }
 
-    const record = this.toRecord(weekId, built, result);
+    // A change may have landed while the worker ran: never present such a plan as current.
+    const fresh = await this.buildInput(weekId);
+    const record = {
+      ...this.toRecord(weekId, built, result),
+      stale: hashPlanInput(fresh.input) !== hashPlanInput(built.input),
+    };
     await this.deps.plans.put(record);
     await this.deps.events.append([this.calculatedEvent(weekId, previous, record)]);
     return { ok: true, record, result, elapsedMs };
@@ -138,10 +152,14 @@ export class PlanService {
    */
   readonly onChange = async (change: ChangeSummary): Promise<void> => {
     const records = await this.deps.plans.list();
+    const config =
+      change.entity === 'order'
+        ? { recipes: [], menus: [], settings: await this.deps.settings.get() }
+        : await this.loadConfig();
     const events: HistoryEvent[] = [];
     const updated: PlanRecord[] = [];
     for (const record of records) {
-      if (record.stale || !isPlanAffected(record, change)) continue;
+      if (record.stale || !isPlanAffected(record, change, config)) continue;
       updated.push({ ...record, stale: true });
       events.push(
         this.event(record.weekId, change.atMs, 'stale', false, true, 'plan-stale', {
