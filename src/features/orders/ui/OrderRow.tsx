@@ -3,7 +3,7 @@ import { Badge } from '@/shared/ui/Badge';
 import { Button } from '@/shared/ui/Button';
 import type { Order } from '../domain/order';
 
-export const ORDER_ROW_HEIGHT = 92;
+export const ORDER_ROW_HEIGHT = 116;
 
 /** Presentational row: two lines so it reads well at 360 px. */
 export function OrderRow({ order, onEdit, onCancel }: { order: Order; onEdit(order: Order): void; onCancel(order: Order): void }) {

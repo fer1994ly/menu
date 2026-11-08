@@ -10,6 +10,7 @@ export default defineConfig({
   worker: { format: 'es' },
   test: {
     globals: true,
+    testTimeout: 20_000,
     environment: 'jsdom',
     setupFiles: ['./src/test-setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],

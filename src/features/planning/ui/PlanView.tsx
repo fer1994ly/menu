@@ -18,7 +18,7 @@ export interface PlanViewProps {
 
 function SolutionTable({ testId, title, rows }: { testId: string; title: string; rows: { code: string; name: string; value: string }[] }) {
   return (
-    <div>
+    <div className="min-w-0">
       <h3 className="mb-2 text-base font-bold">{title}</h3>
       <TableScroll>
         <Table data-testid={testId}>
@@ -69,7 +69,7 @@ function PlanBody({ record, outcome, elapsedMs }: { record: PlanRecord; outcome:
   return (
     <>
       <Card title="Resumen">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
           <Stat label="Porciones totales (D)" testId="plan-d">
             {record.input.totalPortions}
           </Stat>

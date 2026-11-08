@@ -115,12 +115,12 @@ export function msUntilClose(weekId: string, now: Instant, closeTime: CloseTime 
 }
 
 /**
- * Week being produced / delivered next: the delivery Sunday on or after today's
+ * Week being produced / delivered next: the first delivery Sunday after today's
  * Monterrey date. Unlike {@link weekIdForInstant} it stays on the closing week
- * after the Saturday close, until that Sunday has passed.
+ * after the Saturday close, until Sunday, when a new cycle starts (quotas reset).
  */
 export function productionWeekId(now: Instant): string {
   const local = new Date(toMs(now) - OFFSET_MS);
   const midnight = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
-  return utcMsToDate(midnight + ((7 - local.getUTCDay()) % 7) * DAY_MS);
+  return utcMsToDate(midnight + (7 - local.getUTCDay()) * DAY_MS);
 }

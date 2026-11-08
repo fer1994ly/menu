@@ -107,10 +107,10 @@ describe('isWeekClosed / msUntilClose', () => {
 });
 
 describe('productionWeekId', () => {
-  it('stays on the closing week after the Saturday close and on delivery Sunday', () => {
+  it('stays on the closing week after the Saturday close and starts a new cycle on Sunday', () => {
     expect(productionWeekId(local(2026, 11, 13, 10))).toBe('2026-11-15'); // Friday
     expect(productionWeekId(local(2026, 11, 14, 11, 31))).toBe('2026-11-15'); // Saturday after close
-    expect(productionWeekId(local(2026, 11, 15, 9))).toBe('2026-11-15'); // delivery Sunday
+    expect(productionWeekId(local(2026, 11, 15, 9))).toBe('2026-11-22'); // delivery Sunday: new cycle
     expect(productionWeekId(local(2026, 11, 16, 0, 0, 1))).toBe('2026-11-22'); // Monday
   });
 });
