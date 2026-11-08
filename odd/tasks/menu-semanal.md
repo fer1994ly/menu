@@ -9,7 +9,7 @@ Browser app (React + TS + Tailwind + IndexedDB + Web Worker) that computes the m
 - Architecture: DDD vertical slices + SOLID. `src/features/<slice>/{domain,application,infrastructure,ui}`; `src/shared/` kernel. Domain is pure TS (no React, no IndexedDB). Application depends on ports (interfaces); infrastructure implements them.
 - Strict TDD (RED → GREEN → REFACTOR). Runner: Vitest (`npm test`), coverage via `@vitest/coverage-v8` with ≥ 80 % threshold enforced on engine (planning + shopping domain). E2E: Playwright, projects `mobile-360` (360×740) and `desktop`.
 - Commits: Conventional Commits, NO AI attribution / Co-Authored-By trailers (user global rule). Work on branch `feat/menu-semanal`; fast-forward `main` and push at the end (user explicitly asked to push).
-- Briefing says repo must not be public: verify visibility before push.
+- Repo is public (user decision): no mentions of the intermediary platform anywhere.
 
 ## Resolved decisions (briefing gaps / contradictions)
 - Timezone: America/Monterrey = fixed UTC−6 (no DST since 2022). Order belongs to the first Saturday-11:30:00 close ≥ createdAt (11:30:00 inclusive, 11:30:01 next week); week id = delivery Sunday date (YYYY-MM-DD).
@@ -24,8 +24,8 @@ Browser app (React + TS + Tailwind + IndexedDB + Web Worker) that computes the m
 
 ## Tasks
 - [x] T0 Repo init, briefing captured, feature doc — route: inline (mechanical).
-- [ ] T1 Scaffold & tooling: Vite+React+TS strict, Tailwind (palette/fonts via @fontsource), ESLint no-console, Vitest+coverage thresholds, Playwright config, netlify.toml, slice skeleton — route: delegated (writer trigger: 2+ files).
-- [ ] T2 Planning engine: two-phase simplex (Bland, 1e-9, pivot trace), lexicographic tie-break model, model builder (rotation, 10–30 %, pre-checks D=0 / <4 recipes / G>D), largest remainder, post-rounding verification messages, half-up formatting; 4 briefing cases + edge cases as tests — route: delegated.
+- [x] T1 Scaffold & tooling: Vite+React+TS strict, Tailwind (palette/fonts via @fontsource), ESLint no-console, Vitest+coverage thresholds, Playwright config, netlify.toml, slice skeleton — route: delegated (writer trigger: 2+ files).
+- [x] T2 Planning engine: two-phase simplex (Bland, 1e-9, pivot trace), lexicographic tie-break model, model builder (rotation, 10–30 %, pre-checks D=0 / <4 recipes / G>D), largest remainder, post-rounding verification messages, half-up formatting; 4 briefing cases + edge cases as tests — route: delegated.
 - [ ] T3 Shopping + orders/routes/close domain + conflict rule + recipe validation (pure) with tests — route: delegated.
 - [ ] T4 Persistence & data: IndexedDB repos, event store, undo/redo 50, snapshots + state-at, BroadcastChannel sync & conflicts, seed generator, restore sample data, Web Worker (current week + 52-week recalculation), perf test — route: delegated.
 - [ ] T5 UI: all screens (home, orders, recipes, plan, explanation, shopping, routes, history, admin, settings), empty/error states, mobile-first 360 px — route: delegated.
@@ -45,3 +45,5 @@ Strategy: user asked for a direct push to `main`; work-unit commits per task on 
 
 ## Progress / evidence
 - T0: done.
+- T1: 2348f68. T2: b731d95, 086809d, d47700f. npm test 65/65 pass; engine coverage stmts 99.66%, branches 86.09%, funcs 100%, lines 100%; lint/typecheck/build OK; playwright smoke 2/2.
+- Review: RDD consent for T1–T2 slice (medium) left unanswered; user asked to push.
