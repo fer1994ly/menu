@@ -7,6 +7,8 @@ import { RoutesScreen } from '@/features/routes/ui/RoutesScreen';
 import { OrdersScreen } from '@/features/orders/ui/OrdersScreen';
 import { RecipesScreen } from '@/features/recipes/ui/RecipesScreen';
 import { HistoryScreen } from '@/features/history/ui/HistoryScreen';
+import { AdminScreen } from '@/features/admin/ui/AdminScreen';
+import { SettingsScreen } from '@/features/admin/ui/SettingsScreen';
 import { AppServicesProvider } from './AppServicesProvider';
 import { AppShell } from './AppShell';
 import { DataVersionProvider, WeekProvider } from './DataProviders';
@@ -27,6 +29,8 @@ export function AppRoutes() {
             <Route path="/pedidos" element={<OrdersScreen />} />
             <Route path="/recetas" element={<RecipesScreen />} />
             <Route path="/historial" element={<HistoryScreen />} />
+            <Route path="/ajustes" element={<SettingsScreen />} />
+            <Route path="/admin" element={<AdminScreen />} />
             <Route path="/mas" element={<MoreScreen />} />
             <Route path="*" element={<NotFound />} />
           </Route>
