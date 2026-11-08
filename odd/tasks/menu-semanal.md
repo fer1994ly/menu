@@ -26,8 +26,8 @@ Browser app (React + TS + Tailwind + IndexedDB + Web Worker) that computes the m
 - [x] T0 Repo init, briefing captured, feature doc — route: inline (mechanical).
 - [x] T1 Scaffold & tooling: Vite+React+TS strict, Tailwind (palette/fonts via @fontsource), ESLint no-console, Vitest+coverage thresholds, Playwright config, netlify.toml, slice skeleton — route: delegated (writer trigger: 2+ files).
 - [x] T2 Planning engine: two-phase simplex (Bland, 1e-9, pivot trace), lexicographic tie-break model, model builder (rotation, 10–30 %, pre-checks D=0 / <4 recipes / G>D), largest remainder, post-rounding verification messages, half-up formatting; 4 briefing cases + edge cases as tests — route: delegated.
-- [ ] T3 Shopping + orders/routes/close domain + conflict rule + recipe validation (pure) with tests — route: delegated.
-- [ ] T4 Persistence & data: IndexedDB repos, event store, undo/redo 50, snapshots + state-at, BroadcastChannel sync & conflicts, seed generator, restore sample data, Web Worker (current week + 52-week recalculation), perf test — route: delegated.
+- [x] T3 Shopping + orders/routes/close domain + conflict rule + recipe validation (pure) with tests — route: delegated.
+- [x] T4 Persistence & data: IndexedDB repos, event store, undo/redo 50, snapshots + state-at, BroadcastChannel sync & conflicts, seed generator, restore sample data, Web Worker (current week + 52-week recalculation), perf test — route: delegated.
 - [ ] T5 UI: all screens (home, orders, recipes, plan, explanation, shopping, routes, history, admin, settings), empty/error states, mobile-first 360 px — route: delegated.
 - [ ] T6 E2E Playwright (mobile + desktop), README with reviewer checklist mapped to acceptance criteria, Netlify deploy prep, push — route: delegated + inline git.
 
@@ -47,3 +47,5 @@ Strategy: user asked for a direct push to `main`; work-unit commits per task on 
 - T0: done.
 - T1: 2348f68. T2: b731d95, 086809d, d47700f. npm test 65/65 pass; engine coverage stmts 99.66%, branches 86.09%, funcs 100%, lines 100%; lint/typecheck/build OK; playwright smoke 2/2.
 - Review: RDD consent for T1–T2 slice (medium) left unanswered; user asked to push.
+- T3: 7787d87, c191c2e, 87d89c2, 06402be — 127 tests pass.
+- T4: a90122d, 8763f3f, 4608cde, 5911a35, eb3a84b — 186 tests pass, coverage 97/85/98/99; perf 600-portion + 52 weeks well under 4 s. 34/52 history weeks feasible (rest store no-solution plan, documented).
