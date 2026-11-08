@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { uniqueDbName } from '@/features/history/__tests__/helpers';
 import { BEFORE_FIRST_RECORD } from '@/features/history/application/StateAtService';
 import { MAX_UNDO_STEPS, UNDO_EXHAUSTED_MESSAGE } from '@/features/history/application/ChangeService';
@@ -25,17 +26,20 @@ async function boot(startAt: number = FRIDAY): Promise<{ services: AppServices; 
   return { services: result.services, time };
 }
 
+// Every test boots a seeded app (26.000 orders), which can exceed the default timeout.
+vi.setConfig({ testTimeout: 120_000 });
+
 const BRIEFING_INTEGERS = [79, 39, 64, 58, 30, 30];
 
 describe('seeded application', () => {
-  let services: AppServices;
-  let time: { now: number };
+  // Read-only tests share one seeded app; every test that mutates boots its own (order-independent).
+  let shared: AppServices;
   beforeAll(async () => {
-    ({ services, time } = await boot());
+    ({ services: shared } = await boot());
   }, 120_000);
 
   it('has 2.000 clients, 66 recipes, 26.000 history orders over 52 weeks', async () => {
-    const { repos, seedReport } = services;
+    const { repos, seedReport } = shared;
     expect(seedReport.seeded).toBe(true);
     expect(await repos.clients.count()).toBe(2000);
     expect((await repos.recipes.list()).length).toBe(66);
@@ -48,6 +52,7 @@ describe('seeded application', () => {
   });
 
   it('calculates the current week as briefing case 1', async () => {
+    const { services } = await boot();
     const week = weekIdForInstant(FRIDAY);
     const outcome = await services.plans.calculate(week);
     expect(outcome.ok).toBe(true);
@@ -58,7 +63,9 @@ describe('seeded application', () => {
   });
 
   it('an order loaded Saturday 11:31 lands in the next week and leaves the current plan untouched', async () => {
+    const { services, time } = await boot();
     const week = weekIdForInstant(FRIDAY);
+    await services.plans.calculate(week);
     const before = (await services.plans.getRecord(week))!;
     time.now = closeInstantForWeek(week) + MIN; // 11:31
     const placed = await services.orders.place({ clientId: 'c-0001', plan: 5, glutenFree: false, route: 'open' });
@@ -72,10 +79,11 @@ describe('seeded application', () => {
   });
 
   it('rejects orders for unknown clients', async () => {
-    await expect(services.orders.place({ clientId: 'nope', plan: 5, glutenFree: false, route: 'open' })).rejects.toThrow(/nope/);
+    await expect(shared.orders.place({ clientId: 'nope', plan: 5, glutenFree: false, route: 'open' })).rejects.toThrow(/nope/);
   });
 
   it('11:30:00 sharp still belongs to the current week', async () => {
+    const { services, time } = await boot();
     const week = weekIdForInstant(FRIDAY);
     time.now = closeInstantForWeek(week);
     const placed = await services.orders.place({ clientId: 'c-0002', plan: 5, glutenFree: false, route: 'open' });
@@ -116,31 +124,31 @@ describe('undo / redo with seeded data', () => {
 });
 
 describe('«estado al…»', () => {
-  let services: AppServices;
-  let time: { now: number };
+  // Read-only tests share one seeded app; tests that change data boot their own (order-independent).
+  let shared: AppServices;
   beforeAll(async () => {
-    ({ services, time } = await boot());
+    ({ services: shared } = await boot());
   }, 120_000);
 
   it('before the first event it returns the seed state with «Antes del primer registro»', async () => {
-    const state = await services.stateAt.reconstruct(FRIDAY - 400 * 24 * HOUR);
+    const state = await shared.stateAt.reconstruct(FRIDAY - 400 * 24 * HOUR);
     expect(state.notice).toBe(BEFORE_FIRST_RECORD);
     expect(state.orders).toHaveLength(0);
     expect(state.recipes).toHaveLength(66);
-    const later = await services.stateAt.reconstruct(FRIDAY);
+    const later = await shared.stateAt.reconstruct(FRIDAY);
     expect(later.notice).toBe(BEFORE_FIRST_RECORD);
     expect(later.orders.length).toBe(26_050);
   });
 
   it('Saturday 11:00 of a closed week excludes later orders and returns the would-be portions', async () => {
-    const weeks = (await services.repos.plans.list()).filter((p) => p.status === 'optimal').map((p) => p.weekId).sort().reverse();
+    const weeks = (await shared.repos.plans.list()).filter((p) => p.status === 'optimal').map((p) => p.weekId).sort().reverse();
     let checked = false;
     for (const weekId of weeks) {
       const close = closeInstantForWeek(weekId);
       const at = close - 30 * MIN;
-      const [early, final] = await Promise.all([services.stateAt.planAt(weekId, at), services.stateAt.planAt(weekId, close)]);
+      const [early, final] = await Promise.all([shared.stateAt.planAt(weekId, at), shared.stateAt.planAt(weekId, close)]);
       if (early.result.status !== 'optimal' || final.result.status !== 'optimal') continue;
-      const all = await services.repos.orders.listByWeek(weekId);
+      const all = await shared.repos.orders.listByWeek(weekId);
       const expectedEarly = all.filter((o) => o.createdAt <= at);
       expect(early.orderCount).toBe(expectedEarly.length);
       expect(final.orderCount).toBe(all.length);
@@ -155,6 +163,7 @@ describe('«estado al…»', () => {
   });
 
   it('replays recipe, settings and order events up to the instant, across week boundaries', async () => {
+    const { services, time } = await boot();
     const week = weekIdForInstant(FRIDAY);
     const t1 = FRIDAY + HOUR;
     time.now = t1;
@@ -184,6 +193,7 @@ describe('«estado al…»', () => {
   });
 
   it('undo events replay too: the state after an undo shows the restored value', async () => {
+    const { services, time } = await boot();
     time.now += HOUR;
     await services.changes.saveRecipe({ ...(await services.repos.recipes.get('R3'))!, cost: 45 });
     time.now += HOUR;
