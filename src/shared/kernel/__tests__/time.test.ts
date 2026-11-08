@@ -8,6 +8,7 @@ import {
   msUntilClose,
   nextWeekId,
   previousWeekId,
+  productionWeekId,
   weekIdForInstant,
   weekStartInstant,
 } from '../time';
@@ -102,5 +103,14 @@ describe('isWeekClosed / msUntilClose', () => {
   it('counts down and never goes negative', () => {
     expect(msUntilClose(week, local(2026, 11, 14, 11, 0))).toBe(30 * 60 * 1000);
     expect(msUntilClose(week, local(2026, 11, 14, 12, 0))).toBe(0);
+  });
+});
+
+describe('productionWeekId', () => {
+  it('stays on the closing week after the Saturday close and on delivery Sunday', () => {
+    expect(productionWeekId(local(2026, 11, 13, 10))).toBe('2026-11-15'); // Friday
+    expect(productionWeekId(local(2026, 11, 14, 11, 31))).toBe('2026-11-15'); // Saturday after close
+    expect(productionWeekId(local(2026, 11, 15, 9))).toBe('2026-11-15'); // delivery Sunday
+    expect(productionWeekId(local(2026, 11, 16, 0, 0, 1))).toBe('2026-11-22'); // Monday
   });
 });
