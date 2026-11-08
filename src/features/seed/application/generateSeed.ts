@@ -45,7 +45,7 @@ function generateClients(rng: Rng): Client[] {
   const used = new Set<string>();
   const clients: Client[] = [];
   for (let i = 1; i <= CLIENT_COUNT; i += 1) {
-    let name = '';
+    let name: string;
     do {
       const first = FIRST_NAMES[randomInt(rng, 0, FIRST_NAMES.length - 1)] as string;
       const last1 = LAST_NAMES[randomInt(rng, 0, LAST_NAMES.length - 1)] as string;
